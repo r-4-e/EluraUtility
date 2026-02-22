@@ -1199,27 +1199,84 @@ async def coinflip_cmd(interaction: discord.Interaction, amount: int, choice: st
 tree.add_command(economy_group)
 
 # ==========================================================
-# 🌌 PHASE 5 OF 13 – ADVANCED CASE-BASED MODERATION
-# Enterprise-Level Slash Moderation System
+# SECTION 1 – ENTERPRISE MODERATION CORE
+# Permission Engine + Case Engine + Cache + Base Utilities
 # ==========================================================
 
 from discord.ui import View, Button
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 # ==========================================================
-# 🗄 CASE DATABASE HELPERS (ROBUST VERSION)
+# 🔐 MOD PERMISSION ENGINE (CACHE + HIERARCHY)
 # ==========================================================
 
-async def generate_case_id(guild_id: int):
-    """Generate next safe incremental case ID."""
+PERMISSION_CACHE = {}
+
+
+async def refresh_permission_cache(guild_id):
+
+    rows = db.fetch_all("mod_permissions", {
+        "guild_id": guild_id
+    })
+
+    cache = {}
+
+    for row in rows:
+
+        role_id = row["role_id"]
+        perm = row["permission"]
+
+        if role_id not in cache:
+            cache[role_id] = set()
+
+        cache[role_id].add(perm)
+
+    PERMISSION_CACHE[guild_id] = cache
+
+
+async def has_mod_permission(member, permission):
+
+    guild_id = member.guild.id
+
+    if guild_id not in PERMISSION_CACHE:
+        await refresh_permission_cache(guild_id)
+
+    guild_cache = PERMISSION_CACHE.get(guild_id, {})
+
+    for role in member.roles:
+
+        if role.id in guild_cache:
+
+            if permission in guild_cache[role.id]:
+                return True
+
+            if "admin" in guild_cache[role.id]:
+                return True
+
+    return False
+
+
+async def update_permission_cache(guild_id):
+    await refresh_permission_cache(guild_id)
+
+
+# ==========================================================
+# 🗄 CASE DATABASE ENGINE
+# ==========================================================
+
+async def generate_case_id(guild_id):
+
     cases = db.fetch_all("mod_cases", {"guild_id": guild_id})
+
     if not cases:
         return 1
+
     return max(case["id"] for case in cases) + 1
 
 
-async def add_case(guild_id, user_id, moderator_id, action, reason, duration=None):
-    """Insert case into DB safely."""
+async def add_case(guild_id, user_id, moderator_id,
+                   action, reason, duration=None):
+
     case_id = await generate_case_id(guild_id)
 
     db.insert("mod_cases", {
@@ -1237,6 +1294,7 @@ async def add_case(guild_id, user_id, moderator_id, action, reason, duration=Non
 
 
 async def get_user_cases(guild_id, user_id):
+
     return db.fetch_all("mod_cases", {
         "guild_id": guild_id,
         "user_id": user_id
@@ -1244,6 +1302,7 @@ async def get_user_cases(guild_id, user_id):
 
 
 async def get_case_by_id(guild_id, case_id):
+
     return db.fetch_one("mod_cases", {
         "guild_id": guild_id,
         "id": case_id
@@ -1251,22 +1310,26 @@ async def get_case_by_id(guild_id, case_id):
 
 
 async def delete_case(case_id):
+
     db.delete("mod_cases", {"id": case_id})
 
 
 # ==========================================================
-# ⚡ AUTO ESCALATION SYSTEM
+# ⚡ AUTO ESCALATION (3 WARN = AUTO MUTE)
 # ==========================================================
 
 async def auto_escalate(guild, member):
-    """Escalate punishment automatically after 3 warns."""
+
     cases = await get_user_cases(guild.id, member.id)
 
     warns = [c for c in cases if c["action"] == "Warn"]
 
     if len(warns) >= 3:
+
         mute_role = discord.utils.get(guild.roles, name="Muted")
+
         if mute_role:
+
             try:
                 await member.add_roles(mute_role)
             except:
@@ -1282,18 +1345,20 @@ async def auto_escalate(guild, member):
 
 
 # ==========================================================
-# 🧠 CASE PAGINATION VIEW (FOR LARGE HISTORY)
+# 🧠 CASE PAGINATOR (UI)
 # ==========================================================
 
 class CasePaginator(View):
 
     def __init__(self, cases):
+
         super().__init__(timeout=60)
         self.cases = cases
         self.page = 0
         self.per_page = 5
 
-    def get_embed(self):
+    def build_embed(self):
+
         start = self.page * self.per_page
         end = start + self.per_page
         chunk = self.cases[start:end]
@@ -1305,51 +1370,271 @@ class CasePaginator(View):
         )
 
         for case in chunk:
+
             embed.add_field(
                 name=f"Case #{case['id']} — {case['action']}",
                 value=f"User: <@{case['user_id']}>\nReason: {case['reason']}",
                 inline=False
             )
 
-        embed.set_footer(text=f"Page {self.page + 1}/{max(1, len(self.cases)//self.per_page + 1)}")
+        total_pages = max(1, len(self.cases) // self.per_page + 1)
+
+        embed.set_footer(
+            text=f"Page {self.page + 1}/{total_pages}"
+        )
+
         return embed
 
-    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.primary)
-    async def prev(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.primary)
+    async def back(self, interaction: discord.Interaction, button: Button):
+
         if self.page > 0:
             self.page -= 1
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
-    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
-    async def next(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.primary)
+    async def forward(self, interaction: discord.Interaction, button: Button):
+
         if (self.page + 1) * self.per_page < len(self.cases):
             self.page += 1
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+)
+
+# ==========================================================
+# 🌌 PHASE 2 – ENTERPRISE MOD CORE
+# Permission Engine + Case System + Stats + Base Commands
+# ==========================================================
+
+from discord.ui import View, Button
+from datetime import datetime, timedelta
+
+# ==========================================================
+# 🔐 PERMISSION ENGINE (ROLE BASED)
+# ==========================================================
+
+PERMISSION_CACHE = {}
+
+
+async def refresh_permission_cache(guild_id):
+
+    rows = db.fetch_all("mod_permissions", {
+        "guild_id": guild_id
+    })
+
+    cache = {}
+
+    for row in rows:
+
+        role_id = row["role_id"]
+        perm = row["permission"]
+
+        if role_id not in cache:
+            cache[role_id] = set()
+
+        cache[role_id].add(perm)
+
+    PERMISSION_CACHE[guild_id] = cache
+
+
+async def has_mod_permission(member, permission):
+
+    guild_id = member.guild.id
+
+    if guild_id not in PERMISSION_CACHE:
+        await refresh_permission_cache(guild_id)
+
+    cache = PERMISSION_CACHE.get(guild_id, {})
+
+    for role in member.roles:
+
+        if role.id in cache:
+
+            if permission in cache[role.id]:
+                return True
+
+            if "admin" in cache[role.id]:
+                return True
+
+    return False
+
+
+async def require_perm(interaction, perm):
+
+    if not await has_mod_permission(interaction.user, perm):
+
+        await interaction.response.send_message(
+            f"🚫 Missing `{perm}` permission.",
+            ephemeral=True
+        )
+
+        return False
+
+    return True
 
 
 # ==========================================================
-# 🌟 MODERATION SLASH GROUP
+# 🗄 CASE SYSTEM
+# ==========================================================
+
+async def create_case(guild_id, user_id,
+                      moderator_id, action,
+                      reason, duration=None):
+
+    cases = db.fetch_all("mod_cases", {
+        "guild_id": guild_id
+    })
+
+    case_id = len(cases) + 1
+
+    db.insert("mod_cases", {
+        "id": case_id,
+        "guild_id": guild_id,
+        "user_id": user_id,
+        "moderator_id": moderator_id,
+        "action": action,
+        "reason": reason,
+        "duration": duration,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+    return case_id
+
+
+async def get_user_cases(guild_id, user_id):
+
+    return db.fetch_all("mod_cases", {
+        "guild_id": guild_id,
+        "user_id": user_id
+    })
+
+
+async def delete_case(case_id):
+
+    db.delete("mod_cases", {"id": case_id})
+
+
+# ==========================================================
+# ⚡ AUTO ESCALATION
+# 3 WARN = AUTO MUTE
+# ==========================================================
+
+async def auto_escalate(guild, member):
+
+    cases = await get_user_cases(guild.id, member.id)
+
+    warns = [c for c in cases if c["action"] == "Warn"]
+
+    if len(warns) >= 3:
+
+        role = discord.utils.get(guild.roles, name="Muted")
+
+        if role:
+
+            try:
+                await member.add_roles(role)
+            except:
+                pass
+
+            await create_case(
+                guild.id,
+                member.id,
+                guild.me.id,
+                "Auto-Mute",
+                "Escalation after 3 warnings"
+            )
+
+
+# ==========================================================
+# 📜 CASE VIEW
+# ==========================================================
+
+class CasePaginator(View):
+
+    def __init__(self, cases):
+
+        super().__init__(timeout=60)
+        self.cases = cases
+        self.page = 0
+        self.per_page = 5
+
+    def build_embed(self):
+
+        start = self.page * self.per_page
+        end = start + self.per_page
+
+        chunk = self.cases[start:end]
+
+        embed = discord.Embed(
+            title="📋 Case History",
+            color=discord.Color.orange()
+        )
+
+        for case in chunk:
+
+            embed.add_field(
+                name=f"Case #{case['id']} — {case['action']}",
+                value=f"Reason: {case['reason']}",
+                inline=False
+            )
+
+        total = max(1, len(self.cases) // self.per_page + 1)
+
+        embed.set_footer(
+            text=f"Page {self.page+1}/{total}"
+        )
+
+        return embed
+
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.primary)
+    async def back(self, interaction, button):
+
+        if self.page > 0:
+            self.page -= 1
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.primary)
+    async def forward(self, interaction, button):
+
+        if (self.page + 1) * self.per_page < len(self.cases):
+            self.page += 1
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+
+# ==========================================================
+# 🔥 BASE MOD COMMANDS
+# (Warn / Mute / Kick / Ban / History / Notes)
 # ==========================================================
 
 moderation_group = app_commands.Group(
     name="moderation",
-    description="Advanced Case-Based Moderation System"
+    description="Core Moderation Commands"
 )
 
 
-# ==========================================================
-# 🚨 WARN COMMAND
-# ==========================================================
+@moderation_group.command(name="warn")
+async def warn_cmd(interaction,
+                   member: discord.Member,
+                   reason: str):
 
-@moderation_group.command(name="warn", description="Warn a member")
-@app_commands.checks.has_permissions(manage_roles=True)
-async def warn_slash(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    reason: str = "No reason provided"
-):
+    if not await require_perm(interaction, "warn"):
+        return
 
-    case_id = await add_case(
+    case_id = await create_case(
         interaction.guild.id,
         member.id,
         interaction.user.id,
@@ -1359,121 +1644,26 @@ async def warn_slash(
 
     await auto_escalate(interaction.guild, member)
 
-    counts = await get_user_cases(interaction.guild.id, member.id)
-
-    embed = EmbedEngine.create(
-        "⚠️ Member Warned",
-        f"Case #{case_id}\n"
-        f"{member.mention} warned.\n\nReason: {reason}\n\n"
-        f"Total Cases: {len(counts)}"
-    )
-
-    await interaction.response.send_message(embed=embed)
-
-
-# ==========================================================
-# 📋 VIEW CASES (WITH PAGINATION)
-# ==========================================================
-
-@moderation_group.command(name="cases", description="View user cases")
-async def cases_slash(
-    interaction: discord.Interaction,
-    member: discord.Member = None
-):
-
-    member = member or interaction.user
-    cases = await get_user_cases(interaction.guild.id, member.id)
-
-    if not cases:
-        return await interaction.response.send_message(
-            embed=EmbedEngine.create(
-                "No Cases",
-                f"{member.mention} has no moderation history."
-            )
-        )
-
-    view = CasePaginator(cases)
-
     await interaction.response.send_message(
-        embed=view.get_embed(),
-        view=view
+        f"⚠ Warned | Case #{case_id}"
     )
 
 
-# ==========================================================
-# ❌ DELETE CASE (WITH CONFIRMATION BUTTONS)
-# ==========================================================
+@moderation_group.command(name="mute")
+async def mute_cmd(interaction,
+                   member: discord.Member,
+                   duration_minutes: int,
+                   reason: str):
 
-class DeleteConfirm(View):
+    if not await require_perm(interaction, "mute"):
+        return
 
-    def __init__(self, case_id):
-        super().__init__(timeout=30)
-        self.case_id = case_id
+    role = discord.utils.get(interaction.guild.roles, name="Muted")
 
-    @discord.ui.button(label="Confirm Delete", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: Button):
-        await delete_case(self.case_id)
-        await interaction.response.edit_message(
-            content=f"✅ Case #{self.case_id} deleted.",
-            view=None
-        )
+    if role:
+        await member.add_roles(role)
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.edit_message(
-            content="❌ Action cancelled.",
-            view=None
-        )
-
-
-@moderation_group.command(name="delete_case", description="Delete a moderation case")
-@app_commands.checks.has_permissions(manage_guild=True)
-async def delete_case_cmd(
-    interaction: discord.Interaction,
-    case_id: int
-):
-
-    case = await get_case_by_id(interaction.guild.id, case_id)
-
-    if not case:
-        return await interaction.response.send_message(
-            "⚠️ Case not found.",
-            ephemeral=True
-        )
-
-    view = DeleteConfirm(case_id)
-
-    await interaction.response.send_message(
-        content=f"Are you sure you want to delete Case #{case_id}?",
-        view=view,
-        ephemeral=True
-    )
-
-
-# ==========================================================
-# 🔇 MUTE (TEMPORARY SUPPORTED)
-# ==========================================================
-
-@moderation_group.command(name="mute", description="Mute a member temporarily")
-@app_commands.checks.has_permissions(manage_roles=True)
-async def mute_slash(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    duration_minutes: int,
-    reason: str = "No reason provided"
-):
-
-    mute_role = discord.utils.get(interaction.guild.roles, name="Muted")
-
-    if not mute_role:
-        return await interaction.response.send_message(
-            "⚠️ No Muted role found.",
-            ephemeral=True
-        )
-
-    await member.add_roles(mute_role)
-
-    case_id = await add_case(
+    case_id = await create_case(
         interaction.guild.id,
         member.id,
         interaction.user.id,
@@ -1482,27 +1672,598 @@ async def mute_slash(
         duration_minutes
     )
 
-    # Auto unmute scheduler
-    async def unmute_later():
-        await asyncio.sleep(duration_minutes * 60)
-        try:
-            await member.remove_roles(mute_role)
-        except:
-            pass
+    async def auto_unmute():
 
-    bot.loop.create_task(unmute_later())
+        await asyncio.sleep(duration_minutes * 60)
+
+        if role:
+            try:
+                await member.remove_roles(role)
+            except:
+                pass
+
+    bot.loop.create_task(auto_unmute())
 
     await interaction.response.send_message(
-        embed=EmbedEngine.create(
-            "🔇 Member Muted",
-            f"Case #{case_id}\nDuration: {duration_minutes} minutes\nReason: {reason}"
+        f"🔇 Muted | Case #{case_id}"
+    )
+
+
+@moderation_group.command(name="kick")
+async def kick_cmd(interaction,
+                   member: discord.Member,
+                   reason: str):
+
+    if not await require_perm(interaction, "kick"):
+        return
+
+    await member.kick(reason=reason)
+
+    case_id = await create_case(
+        interaction.guild.id,
+        member.id,
+        interaction.user.id,
+        "Kick",
+        reason
+    )
+
+    await interaction.response.send_message(
+        f"👢 Kicked | Case #{case_id}"
+    )
+
+
+@moderation_group.command(name="ban")
+async def ban_cmd(interaction,
+                  member: discord.Member,
+                  reason: str):
+
+    if not await require_perm(interaction, "ban"):
+        return
+
+    await member.ban(reason=reason)
+
+    case_id = await create_case(
+        interaction.guild.id,
+        member.id,
+        interaction.user.id,
+        "Ban",
+        reason
+    )
+
+    await interaction.response.send_message(
+        f"🔨 Banned | Case #{case_id}"
+    )
+
+
+@moderation_group.command(name="history")
+async def history_cmd(interaction,
+                      member: discord.Member):
+
+    cases = await get_user_cases(interaction.guild.id, member.id)
+
+    if not cases:
+        return await interaction.response.send_message(
+            "No history found.",
+            ephemeral=True
         )
+
+    view = CasePaginator(cases)
+
+    await interaction.response.send_message(
+        embed=view.build_embed(),
+        view=view
+    )
+
+
+tree.add_command(moderation_group)
+
+# ==========================================================
+# 🌌 PHASE 3 – FULL MOD COMMAND LIBRARY
+# Every Moderation Utility Command
+# ==========================================================
+
+# Use the same moderation_group from Phase 2
+# moderation_group = app_commands.Group(...)
+
+
+# ==========================================================
+# 💥 SOFTBAN
+# ==========================================================
+
+@moderation_group.command(name="softban")
+async def softban_cmd(interaction,
+                      member: discord.Member,
+                      reason: str):
+
+    if not await require_perm(interaction, "ban"):
+        return
+
+    await member.ban(reason=reason, delete_message_days=7)
+    await interaction.guild.unban(member)
+
+    case_id = await create_case(
+        interaction.guild.id,
+        member.id,
+        interaction.user.id,
+        "Softban",
+        reason
+    )
+
+    await interaction.response.send_message(
+        f"💥 Softbanned | Case #{case_id}"
     )
 
 
 # ==========================================================
-# REGISTER MODERATION GROUP
+# 🔓 UNBAN
 # ==========================================================
+
+@moderation_group.command(name="unban")
+async def unban_cmd(interaction,
+                    user_id: str):
+
+    if not await require_perm(interaction, "ban"):
+        return
+
+    user = await bot.fetch_user(int(user_id))
+
+    await interaction.guild.unban(user)
+
+    await interaction.response.send_message(
+        f"✅ Unbanned {user}"
+    )
+
+
+# ==========================================================
+# ⏱ TIMEOUT
+# ==========================================================
+
+@moderation_group.command(name="timeout")
+async def timeout_cmd(interaction,
+                      member: discord.Member,
+                      minutes: int,
+                      reason: str):
+
+    if not await require_perm(interaction, "timeout"):
+        return
+
+    until = datetime.utcnow() + timedelta(minutes=minutes)
+
+    await member.edit(communication_disabled_until=until)
+
+    case_id = await create_case(
+        interaction.guild.id,
+        member.id,
+        interaction.user.id,
+        "Timeout",
+        reason,
+        minutes
+    )
+
+    await interaction.response.send_message(
+        f"⏳ Timed Out | Case #{case_id}"
+    )
+
+
+# ==========================================================
+# ⏪ UNTIMEOUT
+# ==========================================================
+
+@moderation_group.command(name="untimeout")
+async def untimeout_cmd(interaction,
+                        member: discord.Member):
+
+    if not await require_perm(interaction, "timeout"):
+        return
+
+    await member.edit(communication_disabled_until=None)
+
+    await interaction.response.send_message(
+        f"✅ Removed timeout from {member.mention}"
+    )
+
+
+# ==========================================================
+# 🔥 MASS BAN
+# ==========================================================
+
+@moderation_group.command(name="massban")
+async def massban_cmd(interaction,
+                      user_ids: str):
+
+    if not await require_perm(interaction, "ban"):
+        return
+
+    ids = user_ids.split(",")
+
+    banned = 0
+
+    for uid in ids:
+
+        try:
+            user = await bot.fetch_user(int(uid.strip()))
+            await interaction.guild.ban(user)
+            banned += 1
+
+        except:
+            continue
+
+    await interaction.response.send_message(
+        f"🔥 MassBanned {banned} users"
+    )
+
+
+# ==========================================================
+# 💣 MASS KICK
+# ==========================================================
+
+@moderation_group.command(name="masskick")
+async def masskick_cmd(interaction,
+                       user_ids: str):
+
+    if not await require_perm(interaction, "kick"):
+        return
+
+    ids = user_ids.split(",")
+
+    kicked = 0
+
+    for uid in ids:
+
+        member = interaction.guild.get_member(int(uid.strip()))
+
+        if member:
+            try:
+                await member.kick()
+                kicked += 1
+            except:
+                continue
+
+    await interaction.response.send_message(
+        f"👢 MassKicked {kicked} users"
+    )
+
+
+# ==========================================================
+# 🧹 CLEAR CHANNEL MESSAGES
+# ==========================================================
+
+@moderation_group.command(name="clear")
+async def clear_cmd(interaction,
+                    amount: int):
+
+    if not await require_perm(interaction, "clear"):
+        return
+
+    deleted = await interaction.channel.purge(limit=amount)
+
+    await interaction.response.send_message(
+        f"🧹 Deleted {len(deleted)} messages",
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# 🧹 CLEAR USER MESSAGES
+# ==========================================================
+
+@moderation_group.command(name="clear_user")
+async def clear_user_cmd(interaction,
+                         member: discord.Member):
+
+    if not await require_perm(interaction, "clear"):
+        return
+
+    def check(msg):
+        return msg.author == member
+
+    deleted = await interaction.channel.purge(limit=200,
+                                              check=check)
+
+    await interaction.response.send_message(
+        f"🧹 Deleted {len(deleted)} messages from {member.mention}",
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# 🧹 CLEAR BOT MESSAGES
+# ==========================================================
+
+@moderation_group.command(name="clear_bot")
+async def clear_bot_cmd(interaction):
+
+    if not await require_perm(interaction, "clear"):
+        return
+
+    def check(msg):
+        return msg.author.bot
+
+    deleted = await interaction.channel.purge(limit=200,
+                                              check=check)
+
+    await interaction.response.send_message(
+        f"🤖 Deleted {len(deleted)} bot messages",
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# 🔗 CLEAR LINKS
+# ==========================================================
+
+@moderation_group.command(name="clear_links")
+async def clear_links_cmd(interaction):
+
+    if not await require_perm(interaction, "clear"):
+        return
+
+    import re
+
+    link_regex = r"http[s]?://"
+
+    def check(msg):
+        return re.search(link_regex, msg.content)
+
+    deleted = await interaction.channel.purge(limit=200,
+                                              check=check)
+
+    await interaction.response.send_message(
+        f"🔗 Deleted {len(deleted)} link messages",
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# 🖼 CLEAR IMAGES
+# ==========================================================
+
+@moderation_group.command(name="clear_images")
+async def clear_images_cmd(interaction):
+
+    if not await require_perm(interaction, "clear"):
+        return
+
+    def check(msg):
+        return len(msg.attachments) > 0
+
+    deleted = await interaction.channel.purge(limit=200,
+                                              check=check)
+
+    await interaction.response.send_message(
+        f"🖼 Deleted {len(deleted)} image messages",
+        ephemeral=True
+    )
+
+
+# ==========================================================
+# 🔒 LOCK CHANNEL
+# ==========================================================
+
+@moderation_group.command(name="lock")
+async def lock_cmd(interaction):
+
+    if not await require_perm(interaction, "lock"):
+        return
+
+    await interaction.channel.set_permissions(
+        interaction.guild.default_role,
+        send_messages=False
+    )
+
+    await interaction.response.send_message("🔒 Channel Locked")
+
+
+# ==========================================================
+# 🔓 UNLOCK CHANNEL
+# ==========================================================
+
+@moderation_group.command(name="unlock")
+async def unlock_cmd(interaction):
+
+    if not await require_perm(interaction, "lock"):
+        return
+
+    await interaction.channel.set_permissions(
+        interaction.guild.default_role,
+        send_messages=True
+    )
+
+    await interaction.response.send_message("🔓 Channel Unlocked")
+
+
+# ==========================================================
+# ⏱ SLOWMODE
+# ==========================================================
+
+@moderation_group.command(name="slowmode")
+async def slowmode_cmd(interaction,
+                       seconds: int):
+
+    if not await require_perm(interaction, "lock"):
+        return
+
+    await interaction.channel.edit(slowmode_delay=seconds)
+
+    await interaction.response.send_message(
+        f"⏱ Slowmode set to {seconds}s"
+    )
+
+
+# ==========================================================
+# 🙈 HIDE CHANNEL
+# ==========================================================
+
+@moderation_group.command(name="hide")
+async def hide_cmd(interaction):
+
+    if not await require_perm(interaction, "lock"):
+        return
+
+    await interaction.channel.set_permissions(
+        interaction.guild.default_role,
+        view_channel=False
+    )
+
+    await interaction.response.send_message("🙈 Channel Hidden")
+
+
+# ==========================================================
+# 👁 UNHIDE CHANNEL
+# ==========================================================
+
+@moderation_group.command(name="unhide")
+async def unhide_cmd(interaction):
+
+    if not await require_perm(interaction, "lock"):
+        return
+
+    await interaction.channel.set_permissions(
+        interaction.guild.default_role,
+        view_channel=True
+    )
+
+    await interaction.response.send_message("👁 Channel Visible")
+
+
+# ==========================================================
+# 📊 AUDIT
+# ==========================================================
+
+@moderation_group.command(name="audit")
+async def audit_cmd(interaction):
+
+    if not await require_perm(interaction, "admin"):
+        return
+
+    cases = db.fetch_all("mod_cases", {
+        "guild_id": interaction.guild.id
+    })
+
+    embed = discord.Embed(
+        title="📊 Moderation Audit",
+        description=f"Total Cases: {len(cases)}",
+        color=discord.Color.gold()
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+# ==========================================================
+# 🔎 SEARCH CASES
+# ==========================================================
+
+@moderation_group.command(name="search_cases")
+async def search_cases_cmd(interaction,
+                           keyword: str):
+
+    if not await require_perm(interaction, "admin"):
+        return
+
+    cases = db.fetch_all("mod_cases", {
+        "guild_id": interaction.guild.id
+    })
+
+    results = []
+
+    for case in cases:
+
+        if keyword.lower() in str(case["id"]).lower() or \
+           keyword.lower() in str(case["user_id"]).lower():
+
+            results.append(case)
+
+    if not results:
+        return await interaction.response.send_message(
+            "❌ No cases found.",
+            ephemeral=True
+        )
+
+    desc = ""
+
+    for case in results[:10]:
+        desc += f"Case #{case['id']} | {case['action']} | <@{case['user_id']}>\n"
+
+    embed = discord.Embed(
+        title="🔎 Search Results",
+        description=desc,
+        color=discord.Color.blue()
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+# ==========================================================
+# 🔐 PERMISSION MANAGEMENT
+# ==========================================================
+
+@moderation_group.command(name="grant_perm")
+async def grant_perm_cmd(interaction,
+                         role: discord.Role,
+                         permission: str):
+
+    if not interaction.user.guild_permissions.administrator:
+        return
+
+    db.insert("mod_permissions", {
+        "guild_id": interaction.guild.id,
+        "role_id": role.id,
+        "permission": permission.lower()
+    })
+
+    await refresh_permission_cache(interaction.guild.id)
+
+    await interaction.response.send_message(
+        f"✅ Granted `{permission}` to `{role.name}`"
+    )
+
+
+@moderation_group.command(name="remove_perm")
+async def remove_perm_cmd(interaction,
+                          role: discord.Role,
+                          permission: str):
+
+    if not interaction.user.guild_permissions.administrator:
+        return
+
+    db.delete("mod_permissions", {
+        "guild_id": interaction.guild.id,
+        "role_id": role.id,
+        "permission": permission.lower()
+    })
+
+    await refresh_permission_cache(interaction.guild.id)
+
+    await interaction.response.send_message(
+        f"❌ Removed `{permission}` from `{role.name}`"
+    )
+
+
+@moderation_group.command(name="permission_audit")
+async def permission_audit_cmd(interaction):
+
+    rows = db.fetch_all("mod_permissions", {
+        "guild_id": interaction.guild.id
+    })
+
+    embed = discord.Embed(
+        title="🔐 Permission Audit",
+        color=discord.Color.purple()
+    )
+
+    for row in rows:
+
+        role = interaction.guild.get_role(row["role_id"])
+        name = role.name if role else "Deleted Role"
+
+        embed.add_field(
+            name=name,
+            value=row["permission"],
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed)
+
 
 tree.add_command(moderation_group)
 
@@ -4074,225 +4835,180 @@ bot.loop.create_task(cleanup_old_logs())
 print("✅ PHASE 11 ENTERPRISE FRAMEWORK LOADED")
 
 # ==========================================================
-# PHASE 12 – ENTERPRISE AI POWERED HELP SYSTEM
-# FINAL PRODUCTION VERSION
+# 🌌 PHASE 12 – ENTERPRISE HELP SYSTEM
+# DROPDOWN + COMMAND DETAIL POPUP
 # ==========================================================
 
-import aiohttp
-from discord.ui import View, Button, Select
+from discord.ui import View, Select, Button
+
 
 # ==========================================================
-# CACHE COMMANDS (FAST ACCESS)
+# GET ALL COMMANDS GROUPED
 # ==========================================================
 
-def cache_commands():
+def get_command_map():
 
-    cmds = []
+    command_map = {}
 
     for cmd in tree.walk_commands():
 
-        cmds.append({
-            "name": cmd.name,
-            "description": cmd.description,
-            "params": [
-                opt.name for opt in getattr(cmd, "parameters", [])
-            ]
-        })
+        group = "Ungrouped"
 
-    return cmds
+        if hasattr(cmd, "parent") and cmd.parent:
+            group = cmd.parent.name
+
+        if group not in command_map:
+            command_map[group] = []
+
+        command_map[group].append(cmd)
+
+    return command_map
 
 
-CACHED_COMMANDS = cache_commands()
+COMMAND_MAP = get_command_map()
 
 
 # ==========================================================
-# PERMISSION AWARE COMMAND ANALYZER
+# HELP VIEW WITH DROPDOWN
 # ==========================================================
 
-RESTRICTED_COMMANDS = {
-    "ban": "Requires **Ban Members** or Administrator permission.",
-    "kick": "Requires **Kick Members** or Administrator permission.",
-    "mute": "Requires **Manage Roles** permission.",
-    "purge": "Requires **Manage Messages** permission.",
-    "lockdown": "Requires **Administrator** permission.",
-}
+class HelpDropdown(View):
 
+    def __init__(self):
 
-async def smart_permission_check(question: str, user: discord.Member):
+        super().__init__(timeout=180)
 
-    for cmd, perm_text in RESTRICTED_COMMANDS.items():
+        self.command_map = COMMAND_MAP
+        self.group_names = list(self.command_map.keys())
 
-        if cmd in question.lower():
+        # Dropdown Options = Command Names
+        options = []
 
-            if not user.guild_permissions.administrator:
+        for group, cmds in self.command_map.items():
 
-                return (
-                    f"🚫 You asked about **/{cmd}**.\n\n"
-               (     f"{perm_text}\n\n"
-                    "❌ You currently do not have permission."
+            for cmd in cmds:
+
+                options.append(
+                    discord.SelectOption(
+                        label=f"/{cmd.name}",
+                        description=cmd.description or "No description",
+                        value=f"{group}:{cmd.name}"
+                    )
                 )
 
-            return (
-                f"✅ You asked about **/{cmd}**.\n\n"
-                f"{perm_text}\n\n"
-                "✔ You have permission to use it."
+        self.select = Select(
+            placeholder="🔍 Select a command to view details...",
+            options=options[:25]  # Discord max limit
+        )
+
+        self.select.callback = self.select_callback
+
+        self.add_item(self.select)
+
+    # ======================================================
+    # WHEN COMMAND SELECTED
+    # ======================================================
+
+    async def select_callback(self, interaction: discord.Interaction):
+
+        value = self.select.values[0]
+
+        group, command_name = value.split(":")
+
+        command = None
+
+        for cmd in self.command_map[group]:
+
+            if cmd.name == command_name:
+                command = cmd
+                break
+
+        if not command:
+
+            return await interaction.response.send_message(
+                "❌ Command not found.",
+                ephemeral=True
             )
 
-    return None
+        embed = discord.Embed(
+            title=f"📖 /{command.name}",
+            description=command.description or "No description",
+            color=discord.Color.green()
+        )
+
+        # Parameters
+        params = getattr(command, "parameters", [])
+
+        if params:
+
+            param_text = ""
+
+            for p in params:
+                param_text += f"🔹 `{p.name}`\n"
+
+            embed.add_field(
+                name="📦 Parameters",
+                value=param_text,
+                inline=False
+            )
+
+        else:
+
+            embed.add_field(
+                name="📦 Parameters",
+                value="None",
+                inline=False
+            )
+
+        embed.add_field(
+            name="🛡 Permission",
+            value="Check required permission in command docs.",
+            inline=False
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
 
 
 # ==========================================================
-# AI ENGINE (GEMINI INTEGRATION)
-# ==========================================================
-
-async def ask_ai(question: str):
-
-    api_key = os.getenv("GEMINI_API_KEY")
-
-    if not api_key:
-        return "❌ AI not configured."
-
-    async with aiohttp.ClientSession() as session:
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
-
-        prompt = f"""
-You are a smart Discord bot assistant.
-
-Available Commands:
-{CACHED_COMMANDS}
-
-User Question:
-{question}
-
-Respond clearly with:
-- Explanation
-- Required permissions
-- Example usage
-- Suggested related commands
-"""
-
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ]
-        }
-
-        async with session.post(url, json=payload) as resp:
-
-            data = await resp.json()
-
-            try:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            except:
-                return "AI failed to generate response."
-
-
-# ==========================================================
-# COMMAND RECOMMENDATION ENGINE
-# AI Suggests Commands Based On User Text
-# ==========================================================
-
-def recommend_commands(query: str):
-
-    matches = []
-
-    for cmd in CACHED_COMMANDS:
-
-        if query.lower() in cmd["name"].lower() or \
-           query.lower() in cmd["description"].lower():
-
-            matches.append(cmd)
-
-    return matches[:5]
-
-
-# ==========================================================
-# AI HELP COMMAND (MAIN ENTRY)
+# MAIN HELP COMMAND
 # ==========================================================
 
 @tree.command(
     name="help",
-    description="Enterprise AI Powered Help System"
+    description="Open Enterprise Help Center"
 )
-async def ai_help(
-    interaction: discord.Interaction
-):
+async def help_command(interaction: discord.Interaction):
 
     embed = discord.Embed(
-        title="🤖 Enterprise AI Help",
-        description="Use the buttons below or ask AI.",
+        title="🌌 Enterprise Help Center",
+        description="Select a command from the dropdown below to see full details.",
         color=discord.Color.gold()
     )
 
-    view = HelpDashboard()
+    view = HelpDropdown()
 
-    await interaction.response.send_message(embed=embed, view=view)
-
-
-# ==========================================================
-# HELP DASHBOARD (BUTTONS + SEARCH)
-# ==========================================================
-
-class HelpDashboard(View):
-
-    def __init__(self):
-        super().__init__(timeout=120)
-
-    @discord.ui.button(label="📚 Browse Commands", style=discord.ButtonStyle.primary)
-    async def browse(self, interaction: discord.Interaction, button: Button):
-
-        desc = ""
-
-        for cmd in CACHED_COMMANDS:
-
-            desc += f"🔹 /{cmd['name']} — {cmd['description']}\n"
-
-        embed = discord.Embed(
-            title="📖 All Commands",
-            description=desc[:4000],
-            color=discord.Color.blue()
-        )
-
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="🤖 Ask AI", style=discord.ButtonStyle.success)
-    async def ask_ai_button(self, interaction: discord.Interaction, button: Button):
-
-        await interaction.response.send_message(
-            "Use `/help_ai question:` to ask the AI assistant.",
-            ephemeral=True
-        )
-
-    @discord.ui.button(label="🔍 Search Commands", style=discord.ButtonStyle.secondary)
-    async def search(self, interaction: discord.Interaction, button: Button):
-
-        await interaction.response.send_message(
-            "Use `/help_search query:` to search commands.",
-            ephemeral=True
-        )
+    await interaction.response.send_message(
+        embed=embed,
+        view=view
+    )
 
 
 # ==========================================================
-# AI QUESTION COMMAND (PERMISSION AWARE)
+# AI HELP (UNCHANGED BUT IMPROVED UI)
 # ==========================================================
 
 @tree.command(
     name="help_ai",
     description="Ask AI about bot commands"
 )
-async def help_ai(
-    interaction: discord.Interaction,
-    question: str
-):
+async def help_ai_command(interaction: discord.Interaction,
+                          question: str):
 
     await interaction.response.defer()
 
-    # 🔐 Permission Check First
     permission_response = await smart_permission_check(
         question,
         interaction.user
@@ -4301,31 +5017,29 @@ async def help_ai(
     if permission_response:
 
         embed = discord.Embed(
-            title="🤖 Permission Analysis",
+            title="🔐 Permission Warning",
             description=permission_response,
             color=discord.Color.red()
         )
 
         return await interaction.followup.send(embed=embed)
 
-    # 🤖 If safe → Ask AI
     ai_response = await ask_ai(question)
 
-    # 🔎 Command Recommendation
     recommendations = recommend_commands(question)
 
-    rec_text = ""
+    extra = ""
 
     if recommendations:
 
-        rec_text += "\n\n🔎 Suggested Commands:\n"
+        extra += "\n\n🔎 Suggested Commands:\n"
 
         for cmd in recommendations:
-            rec_text += f"✅ /{cmd['name']} — {cmd['description']}\n"
+            extra += f"✅ /{cmd['name']} — {cmd['description']}\n"
 
     embed = discord.Embed(
-        title="🤖 AI Response",
-        description=(ai_response[:3500] + rec_text),
+        title="🤖 AI Assistant",
+        description=ai_response[:3500] + extra,
         color=discord.Color.green()
     )
 
@@ -4333,41 +5047,871 @@ async def help_ai(
 
 
 # ==========================================================
-# COMMAND SEARCH COMMAND
+# COMMAND SEARCH (OPTIONAL)
 # ==========================================================
 
 @tree.command(
     name="help_search",
-    description="Search for a command"
+    description="Search commands instantly"
 )
-async def help_search(
-    interaction: discord.Interaction,
-    query: str
-):
+async def help_search_command(interaction: discord.Interaction,
+                              query: str):
 
-    results = recommend_commands(query)
+    results = []
+
+    for cmd in tree.walk_commands():
+
+        if query.lower() in cmd.name.lower() or \
+           query.lower() in (cmd.description or "").lower():
+
+            results.append(cmd)
 
     if not results:
+
         return await interaction.response.send_message(
             "❌ No commands found.",
             ephemeral=True
         )
 
     embed = discord.Embed(
-        title=f"🔍 Search Results: {query}",
+        title=f"🔍 Results – {query}",
         color=discord.Color.blue()
     )
 
-    for cmd in results:
+    for cmd in results[:15]:
 
         embed.add_field(
-            name=f"/{cmd['name']}",
-            value=cmd["description"],
+            name=f"/{cmd.name}",
+            value=cmd.description or "No description",
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ==========================================================
+# 🌌 ENTERPRISE HELP SYSTEM – PART 2
+# CATEGORY DROPDOWN + PAGINATION + NAVIGATION
+# ==========================================================
+
+
+# ==========================================================
+# HELP VIEW (MAIN INTERACTION CONTROLLER)
+# ==========================================================
+
+class HelpView(View):
+
+    def __init__(self, user_id: int):
+
+        super().__init__(timeout=300)
+
+        self.user_id = user_id
+
+        self.database = COMMAND_DATABASE
+
+        self.categories = list(self.database.keys())
+
+        self.current_category = self.categories[0]
+
+        self.pagination = PaginationEngine(
+            self.database[self.current_category]
+        )
+
+        # Create Category Dropdown
+        options = []
+
+        for cat in self.categories:
+
+            options.append(
+                discord.SelectOption(
+                    label=cat,
+                    value=cat
+                )
+            )
+
+        self.category_select = Select(
+            placeholder="📂 Select Command Category",
+            options=options
+        )
+
+        self.category_select.callback = self.category_changed
+
+        self.add_item(self.category_select)
+
+    # ======================================================
+    # CATEGORY SWITCH
+    # ======================================================
+
+    async def category_changed(self, interaction: discord.Interaction):
+
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ This menu is not yours.",
+                ephemeral=True
+            )
+
+        selected_category = self.category_select.values[0]
+
+        self.current_category = selected_category
+
+        self.pagination = PaginationEngine(
+            self.database[self.current_category]
+        )
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    # ======================================================
+    # BUILD HELP EMBED (CATEGORY + PAGINATION)
+    # ======================================================
+
+    def build_embed(self):
+
+        commands = self.pagination.get_page()
+
+        embed = discord.Embed(
+            title=f"🌌 Help – {self.current_category}",
+            description="Select commands below or change category.",
+            color=discord.Color.gold()
+        )
+
+        for cmd in commands:
+
+            embed.add_field(
+                name=f"/{cmd.name}",
+                value=cmd.description or "No description",
+                inline=False
+            )
+
+        embed.set_footer(
+            text=f"Page {self.pagination.page + 1} / {self.pagination.max_pages()}"
+        )
+
+        return embed
+
+    # ======================================================
+    # PREVIOUS PAGE BUTTON
+    # ======================================================
+
+    @discord.ui.button(label="⬅ Previous", style=discord.ButtonStyle.primary)
+    async def previous_page(self,
+                            interaction: discord.Interaction,
+                            button: Button):
+
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ Not your session.",
+                ephemeral=True
+            )
+
+        self.pagination.previous_page()
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    # ======================================================
+    # NEXT PAGE BUTTON
+    # ======================================================
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.primary)
+    async def next_page(self,
+                        interaction: discord.Interaction,
+                        button: Button):
+
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ Not your session.",
+                ephemeral=True
+            )
+
+        self.pagination.next_page()
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    # ======================================================
+    # COMMAND DETAIL BUTTON
+    # Shows popup for selected command
+    # ======================================================
+
+    @discord.ui.button(label="🔎 View Command", style=discord.ButtonStyle.success)
+    async def view_command(self,
+                           interaction: discord.Interaction,
+                           button: Button):
+
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ Not your session.",
+                ephemeral=True
+            )
+
+        commands = self.pagination.get_page()
+
+        if not commands:
+            return await interaction.response.send_message(
+                "❌ No commands on this page.",
+                ephemeral=True
+            )
+
+        # Show first command as example popup
+        command = commands[0]
+
+        embed = build_command_detail_embed(command)
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+               )
+
+# ==========================================================
+# 🌌 PART 3 – ADVANCED HELP ENGINE
+# PAGINATION + SEARCH + LIVE FILTER + COMMAND DETAIL
+# ==========================================================
+
+# ==========================================================
+# SESSION STORAGE
+# ==========================================================
+
+HELP_SESSIONS = {}
+
+
+def get_help_session(user_id):
+
+    if user_id not in HELP_SESSIONS:
+
+        HELP_SESSIONS[user_id] = {
+            "category": None,
+            "page": 0,
+            "search": None,
+            "last_message_id": None
+        }
+
+    return HELP_SESSIONS[user_id]
+
+
+def clear_help_session(user_id):
+
+    if user_id in HELP_SESSIONS:
+        del HELP_SESSIONS[user_id]
+
+
+# ==========================================================
+# COMMAND FILTER ENGINE
+# ==========================================================
+
+def filter_commands(commands, search=None):
+
+    if not search:
+        return commands
+
+    result = []
+
+    for cmd in commands:
+
+        if search.lower() in cmd.name.lower() or \
+           search.lower() in (cmd.description or "").lower():
+
+            result.append(cmd)
+
+    return result
+
+
+# ==========================================================
+# PAGINATION ENGINE
+# ==========================================================
+
+class HelpPagination:
+
+    def __init__(self, commands):
+
+        self.commands = commands
+        self.page = 0
+        self.per_page = 6
+
+    def max_pages(self):
+
+        return max(1, (len(self.commands) - 1) // self.per_page + 1)
+
+    def page_items(self):
+
+        start = self.page * self.per_page
+        end = start + self.per_page
+
+        return self.commands[start:end]
+
+    def next(self):
+
+        if self.page < self.max_pages() - 1:
+            self.page += 1
+
+    def prev(self):
+
+        if self.page > 0:
+            self.page -= 1
+
+
+# ==========================================================
+# HELP VIEW WITH FULL CONTROL
+# ==========================================================
+
+class EnterpriseHelpView(View):
+
+    def __init__(self, user_id):
+
+        super().__init__(timeout=300)
+
+        self.user_id = user_id
+        self.session = get_help_session(user_id)
+
+        self.categories = list(COMMAND_DATABASE.keys())
+
+        if not self.session["category"]:
+            self.session["category"] = self.categories[0]
+
+        self.refresh()
+
+        self.build_dropdown()
+        self.build_search_button()
+
+    # ======================================================
+    # REFRESH DATA
+    # ======================================================
+
+    def refresh(self):
+
+        category = self.session["category"]
+        search = self.session["search"]
+
+        commands = COMMAND_DATABASE.get(category, [])
+        commands = filter_commands(commands, search)
+
+        self.pagination = HelpPagination(commands)
+
+    # ======================================================
+    # BUILD CATEGORY DROPDOWN
+    # ======================================================
+
+    def build_dropdown(self):
+
+        options = []
+
+        for cat in self.categories:
+
+            options.append(
+                discord.SelectOption(
+                    label=cat,
+                    value=cat
+                )
+            )
+
+        dropdown = Select(
+            placeholder="📂 Switch Category",
+            options=options
+        )
+
+        dropdown.callback = self.category_changed
+
+        self.add_item(dropdown)
+
+    # ======================================================
+    # CATEGORY CHANGE
+    # ======================================================
+
+    async def category_changed(self, interaction):
+
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ Not your session",
+                ephemeral=True
+            )
+
+        selected = interaction.data["values"][0]
+
+        self.session["category"] = selected
+        self.session["page"] = 0
+
+        self.refresh()
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    # ======================================================
+    # BUILD SEARCH BUTTON
+    # ======================================================
+
+    def build_search_button(self):
+
+        button = Button(
+            label="🔎 Search",
+            style=discord.ButtonStyle.secondary
+        )
+
+        button.callback = self.search_popup
+
+        self.add_item(button)
+
+    async def search_popup(self, interaction):
+
+        if interaction.user.id != self.user_id:
+            return
+
+        await interaction.response.send_modal(SearchModal(self))
+
+    # ======================================================
+    # BUILD EMBED
+    # ======================================================
+
+    def build_embed(self):
+
+        cmds = self.pagination.page_items()
+
+        embed = discord.Embed(
+            title=f"🌌 Help – {self.session['category']}",
+            color=discord.Color.gold()
+        )
+
+        if not cmds:
+
+            embed.description = "No commands found."
+
+        for cmd in cmds:
+
+            embed.add_field(
+                name=f"/{cmd.name}",
+                value=cmd.description or "No description",
+                inline=False
+            )
+
+        embed.set_footer(
+            text=f"Page {self.pagination.page + 1} / {self.pagination.max_pages()}"
+        )
+
+        return embed
+
+    # ======================================================
+    # PAGINATION BUTTONS
+    # ======================================================
+
+    @discord.ui.button(label="⬅", style=discord.ButtonStyle.primary)
+    async def prev_page(self, interaction, button):
+
+        if interaction.user.id != self.user_id:
+            return
+
+        self.pagination.prev()
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    @discord.ui.button(label="➡", style=discord.ButtonStyle.primary)
+    async def next_page(self, interaction, button):
+
+        if interaction.user.id != self.user_id:
+            return
+
+        self.pagination.next()
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(),
+            view=self
+        )
+
+    # ======================================================
+    # COMMAND DETAIL POPUP
+    # ======================================================
+
+    @discord.ui.button(label="📖 View Command", style=discord.ButtonStyle.success)
+    async def view_command(self, interaction, button):
+
+        if interaction.user.id != self.user_id:
+            return
+
+        cmds = self.pagination.page_items()
+
+        if not cmds:
+            return
+
+        command = cmds[0]
+
+        embed = build_command_detail_embed(command)
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# SEARCH MODAL
+# ==========================================================
+
+class SearchModal(discord.ui.Modal, title="Search Commands"):
+
+    def __init__(self, view):
+
+        super().__init__()
+        self.view = view
+
+    search_input = discord.ui.TextInput(
+        label="Keyword",
+        placeholder="Type command name or keyword..."
+    )
+
+    async def on_submit(self, interaction):
+
+        self.view.session["search"] = self.search_input.value
+        self.view.session["page"] = 0
+        self.view.refresh()
+
+        await interaction.response.edit_message(
+            embed=self.view.build_embed(),
+            view=self.view
+        )
+
+
+# ==========================================================
+# MAIN HELP COMMAND
+# ==========================================================
+
+@tree.command(
+    name="help",
+    description="Open Advanced Help System"
+)
+async def help_command(interaction):
+
+    view = EnterpriseHelpView(interaction.user.id)
+
+    embed = view.build_embed()
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=view
+)
+
+# ==========================================================
+# 🌌 PART 4 – ENTERPRISE COMMAND INTELLIGENCE ENGINE
+# FULL COMMAND ANALYSIS + AUTO DOCUMENT GENERATION
+# ==========================================================
+
+import json
+from typing import Dict
+
+
+# ==========================================================
+# COMMAND INTROSPECTION ENGINE
+# ==========================================================
+
+class CommandIntrospector:
+
+    def __init__(self, command):
+
+        self.command = command
+        self.name = command.name
+        self.description = command.description or "No description"
+        self.params = getattr(command, "parameters", [])
+        self.group = self.get_group()
+        self.aliases = getattr(command, "aliases", [])
+
+    # ------------------------------------------------------
+    # Detect Command Group
+    # ------------------------------------------------------
+
+    def get_group(self):
+
+        if hasattr(self.command, "parent") and self.command.parent:
+            return self.command.parent.name
+
+        return "Standalone"
+
+    # ------------------------------------------------------
+    # Auto Permission Detection (Basic)
+    # ------------------------------------------------------
+
+    def detect_permissions(self):
+
+        perms = []
+
+        text = self.description.lower()
+
+        if "ban" in text:
+            perms.append("Ban Members")
+
+        if "kick" in text:
+            perms.append("Kick Members")
+
+        if "manage" in text:
+            perms.append("Manage Permissions")
+
+        return perms or ["No specific permission detected"]
+
+    # ------------------------------------------------------
+    # Generate Example Usage
+    # ------------------------------------------------------
+
+    def generate_example(self):
+
+        example = f"/{self.name}"
+
+        for param in self.params:
+
+            example += f" <{param.name}>"
+
+        return example
+
+    # ------------------------------------------------------
+    # Build Detailed Embed
+    # ------------------------------------------------------
+
+    def build_embed(self):
+
+        embed = discord.Embed(
+            title=f"📖 /{self.name}",
+            description=self.description,
+            color=discord.Color.green()
+        )
+
+        embed.add_field(
+            name="📂 Group",
+            value=self.group,
+            inline=False
+        )
+
+        embed.add_field(
+            name="🔐 Required Permissions",
+            value="\n".join(self.detect_permissions()),
+            inline=False
+        )
+
+        embed.add_field(
+            name="📝 Example",
+            value=self.generate_example(),
+            inline=False
+        )
+
+        if self.aliases:
+
+            embed.add_field(
+                name="🔁 Aliases",
+                value=", ".join(self.aliases),
+                inline=False
+            )
+
+        if self.params:
+
+            param_text = ""
+
+            for p in self.params:
+                param_text += f"🔹 `{p.name}`\n"
+
+            embed.add_field(
+                name="📦 Parameters",
+                value=param_text,
+                inline=False
+            )
+
+        return embed
+
+    # ------------------------------------------------------
+    # Export as JSON
+    # ------------------------------------------------------
+
+    def export_json(self):
+
+        return json.dumps({
+            "name": self.name,
+            "description": self.description,
+            "group": self.group,
+            "aliases": self.aliases,
+            "parameters": [p.name for p in self.params],
+            "permissions": self.detect_permissions()
+        }, indent=4)
+
+    # ------------------------------------------------------
+    # Export as Markdown
+    # ------------------------------------------------------
+
+    def export_markdown(self):
+
+        md = f"""
+# /{self.name}
+
+## Description
+{self.description}
+
+## Group
+{self.group}
+
+## Example
+`{self.generate_example()}`
+
+## Permissions
+"""
+
+        for perm in self.detect_permissions():
+            md += f"- {perm}\n"
+
+        return md
+
+
+# ==========================================================
+# COMMAND DETAIL POPUP USING INTROSPECTOR
+# ==========================================================
+
+class CommandDetailPopup(discord.ui.View):
+
+    def __init__(self, command):
+
+        super().__init__(timeout=120)
+        self.introspector = CommandIntrospector(command)
+
+    @discord.ui.button(label="📄 View JSON", style=discord.ButtonStyle.secondary)
+    async def json_view(self, interaction, button):
+
+        data = self.introspector.export_json()
+
+        await interaction.response.send_message(
+            f"```json\n{data}\n```",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="📝 View Markdown", style=discord.ButtonStyle.primary)
+    async def markdown_view(self, interaction, button):
+
+        data = self.introspector.export_markdown()
+
+        await interaction.response.send_message(
+            f"```md\n{data}\n```",
+            ephemeral=True
+        )
+
+
+# ==========================================================
+# FUNCTION USED BY HELP SYSTEM
+# ==========================================================
+
+def open_command_detail(command):
+
+    return CommandDetailPopup(command)
+
+# ==========================================================
+# 🌌 PART 5 – HELP ANALYTICS & SMART SUGGESTION ENGINE
+# DATA DRIVEN HELP SYSTEM
+# ==========================================================
+
+import time
+
+
+# ==========================================================
+# DATABASE TABLE REQUIRED
+# help_stats
+#  guild_id
+#  command_name
+#  usage_count
+# ==========================================================
+
+
+# ==========================================================
+# TRACK COMMAND USAGE
+# Call this inside every command
+# ==========================================================
+
+def track_command_usage(guild_id, command_name):
+
+    row = db.fetch_one("help_stats", {
+        "guild_id": guild_id,
+        "command_name": command_name
+    })
+
+    if not row:
+
+        db.insert("help_stats", {
+            "guild_id": guild_id,
+            "command_name": command_name,
+            "usage_count": 1
+        })
+
+    else:
+
+        db.update("help_stats",
+                  {"usage_count": row["usage_count"] + 1},
+                  {
+                      "guild_id": guild_id,
+                      "command_name": command_name
+                  })
+
+
+# ==========================================================
+# GET POPULAR COMMANDS
+# ==========================================================
+
+def get_popular_commands(guild_id, limit=5):
+
+    rows = db.fetch_all("help_stats", {
+        "guild_id": guild_id
+    })
+
+    rows = sorted(rows,
+                  key=lambda x: x["usage_count"],
+                  reverse=True)
+
+    return rows[:limit]
+
+
+# ==========================================================
+# SMART COMMAND SUGGESTION
+# Based on keyword + usage
+# ==========================================================
+
+def smart_suggest(guild_id, keyword):
+
+    popular = get_popular_commands(guild_id)
+
+    suggestions = []
+
+    for row in popular:
+
+        if keyword.lower() in row["command_name"].lower():
+
+            suggestions.append(row["command_name"])
+
+    return suggestions
+
+
+# ==========================================================
+# HELP ANALYTICS EMBED
+# ==========================================================
+
+@tree.command(
+    name="help_stats",
+    description="Show popular commands in this server"
+)
+async def help_stats(interaction: discord.Interaction):
+
+    popular = get_popular_commands(interaction.guild.id)
+
+    embed = discord.Embed(
+        title="📊 Popular Commands",
+        color=discord.Color.blue()
+    )
+
+    for row in popular:
+
+        embed.add_field(
+            name=row["command_name"],
+            value=f"Used {row['usage_count']} times",
             inline=False
         )
 
     await interaction.response.send_message(embed=embed)
-
 # ==========================================================
 # PHASE 13 – PRODUCTION ENGINE
 # AUTO RECOVERY + HEALTH CHECK + BACKUP + CRASH HANDLING
@@ -4519,4 +6063,4 @@ async def system_status(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-bot.run()
+bot.run(DISCORD_TOKEN)

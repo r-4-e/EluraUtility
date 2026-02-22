@@ -1,0 +1,6 @@
+discord.py
+supabase
+aiohttp
+python-dotenv
+asyncpg
+pytz

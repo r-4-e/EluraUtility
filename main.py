@@ -1626,11 +1626,24 @@ moderation_group = app_commands.Group(
 )
 
 
-@moderation_group.command(name="warn")
-async def warn_cmd(interaction,
-                   member: discord.Member,
-                   reason: str):
+# ==========================================================
+# 🔥 FULL MODERATION COMMANDS (NO GROUPS)
+# Standalone Slash Commands
+# ==========================================================
 
+from datetime import datetime, timedelta
+
+
+# ==========================================================
+# ⚠ WARN
+# ==========================================================
+
+@tree.command(name="warn", description="Warn a member")
+async def warn_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str
+):
     if not await require_perm(interaction, "warn"):
         return
 
@@ -1645,16 +1658,21 @@ async def warn_cmd(interaction,
     await auto_escalate(interaction.guild, member)
 
     await interaction.response.send_message(
-        f"⚠ Warned | Case #{case_id}"
+        f"⚠ Warned {member.mention} | Case #{case_id}"
     )
 
 
-@moderation_group.command(name="mute")
-async def mute_cmd(interaction,
-                   member: discord.Member,
-                   duration_minutes: int,
-                   reason: str):
+# ==========================================================
+# 🔇 MUTE
+# ==========================================================
 
+@tree.command(name="mute", description="Mute a member")
+async def mute_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    duration_minutes: int,
+    reason: str
+):
     if not await require_perm(interaction, "mute"):
         return
 
@@ -1673,9 +1691,7 @@ async def mute_cmd(interaction,
     )
 
     async def auto_unmute():
-
         await asyncio.sleep(duration_minutes * 60)
-
         if role:
             try:
                 await member.remove_roles(role)
@@ -1685,15 +1701,20 @@ async def mute_cmd(interaction,
     bot.loop.create_task(auto_unmute())
 
     await interaction.response.send_message(
-        f"🔇 Muted | Case #{case_id}"
+        f"🔇 Muted {member.mention} | Case #{case_id}"
     )
 
 
-@moderation_group.command(name="kick")
-async def kick_cmd(interaction,
-                   member: discord.Member,
-                   reason: str):
+# ==========================================================
+# 👢 KICK
+# ==========================================================
 
+@tree.command(name="kick", description="Kick a member")
+async def kick_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str
+):
     if not await require_perm(interaction, "kick"):
         return
 
@@ -1708,15 +1729,20 @@ async def kick_cmd(interaction,
     )
 
     await interaction.response.send_message(
-        f"👢 Kicked | Case #{case_id}"
+        f"👢 Kicked {member.mention} | Case #{case_id}"
     )
 
 
-@moderation_group.command(name="ban")
-async def ban_cmd(interaction,
-                  member: discord.Member,
-                  reason: str):
+# ==========================================================
+# 🔨 BAN
+# ==========================================================
 
+@tree.command(name="ban", description="Ban a member")
+async def ban_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str
+):
     if not await require_perm(interaction, "ban"):
         return
 
@@ -1731,14 +1757,19 @@ async def ban_cmd(interaction,
     )
 
     await interaction.response.send_message(
-        f"🔨 Banned | Case #{case_id}"
+        f"🔨 Banned {member.mention} | Case #{case_id}"
     )
 
 
-@moderation_group.command(name="history")
-async def history_cmd(interaction,
-                      member: discord.Member):
+# ==========================================================
+# 📜 HISTORY
+# ==========================================================
 
+@tree.command(name="history", description="View a member's case history")
+async def history_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
     cases = await get_user_cases(interaction.guild.id, member.id)
 
     if not cases:
@@ -1755,26 +1786,16 @@ async def history_cmd(interaction,
     )
 
 
-tree.add_command(moderation_group)
-
-# ==========================================================
-# 🌌 PHASE 3 – FULL MOD COMMAND LIBRARY
-# Every Moderation Utility Command
-# ==========================================================
-
-# Use the same moderation_group from Phase 2
-# moderation_group = app_commands.Group(...)
-
-
 # ==========================================================
 # 💥 SOFTBAN
 # ==========================================================
 
-@moderation_group.command(name="softban")
-async def softban_cmd(interaction,
-                      member: discord.Member,
-                      reason: str):
-
+@tree.command(name="softban", description="Softban a member")
+async def softban_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str
+):
     if not await require_perm(interaction, "ban"):
         return
 
@@ -1790,7 +1811,7 @@ async def softban_cmd(interaction,
     )
 
     await interaction.response.send_message(
-        f"💥 Softbanned | Case #{case_id}"
+        f"💥 Softbanned {member.mention} | Case #{case_id}"
     )
 
 
@@ -1798,15 +1819,15 @@ async def softban_cmd(interaction,
 # 🔓 UNBAN
 # ==========================================================
 
-@moderation_group.command(name="unban")
-async def unban_cmd(interaction,
-                    user_id: str):
-
+@tree.command(name="unban", description="Unban a user by ID")
+async def unban_cmd(
+    interaction: discord.Interaction,
+    user_id: str
+):
     if not await require_perm(interaction, "ban"):
         return
 
     user = await bot.fetch_user(int(user_id))
-
     await interaction.guild.unban(user)
 
     await interaction.response.send_message(
@@ -1815,20 +1836,20 @@ async def unban_cmd(interaction,
 
 
 # ==========================================================
-# ⏱ TIMEOUT
+# ⏳ TIMEOUT
 # ==========================================================
 
-@moderation_group.command(name="timeout")
-async def timeout_cmd(interaction,
-                      member: discord.Member,
-                      minutes: int,
-                      reason: str):
-
+@tree.command(name="timeout", description="Timeout a member")
+async def timeout_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    minutes: int,
+    reason: str
+):
     if not await require_perm(interaction, "timeout"):
         return
 
     until = datetime.utcnow() + timedelta(minutes=minutes)
-
     await member.edit(communication_disabled_until=until)
 
     case_id = await create_case(
@@ -1841,7 +1862,7 @@ async def timeout_cmd(interaction,
     )
 
     await interaction.response.send_message(
-        f"⏳ Timed Out | Case #{case_id}"
+        f"⏳ Timed Out {member.mention} | Case #{case_id}"
     )
 
 
@@ -1849,10 +1870,11 @@ async def timeout_cmd(interaction,
 # ⏪ UNTIMEOUT
 # ==========================================================
 
-@moderation_group.command(name="untimeout")
-async def untimeout_cmd(interaction,
-                        member: discord.Member):
-
+@tree.command(name="untimeout", description="Remove timeout from a member")
+async def untimeout_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
     if not await require_perm(interaction, "timeout"):
         return
 
@@ -1867,24 +1889,22 @@ async def untimeout_cmd(interaction,
 # 🔥 MASS BAN
 # ==========================================================
 
-@moderation_group.command(name="massban")
-async def massban_cmd(interaction,
-                      user_ids: str):
-
+@tree.command(name="massban", description="Mass ban users by comma separated IDs")
+async def massban_cmd(
+    interaction: discord.Interaction,
+    user_ids: str
+):
     if not await require_perm(interaction, "ban"):
         return
 
     ids = user_ids.split(",")
-
     banned = 0
 
     for uid in ids:
-
         try:
             user = await bot.fetch_user(int(uid.strip()))
             await interaction.guild.ban(user)
             banned += 1
-
         except:
             continue
 
@@ -1897,21 +1917,19 @@ async def massban_cmd(interaction,
 # 💣 MASS KICK
 # ==========================================================
 
-@moderation_group.command(name="masskick")
-async def masskick_cmd(interaction,
-                       user_ids: str):
-
+@tree.command(name="masskick", description="Mass kick users by comma separated IDs")
+async def masskick_cmd(
+    interaction: discord.Interaction,
+    user_ids: str
+):
     if not await require_perm(interaction, "kick"):
         return
 
     ids = user_ids.split(",")
-
     kicked = 0
 
     for uid in ids:
-
         member = interaction.guild.get_member(int(uid.strip()))
-
         if member:
             try:
                 await member.kick()
@@ -1921,8 +1939,7 @@ async def masskick_cmd(interaction,
 
     await interaction.response.send_message(
         f"👢 MassKicked {kicked} users"
-    )
-
+)
 
 # ==========================================================
 # 🧹 CLEAR CHANNEL MESSAGES

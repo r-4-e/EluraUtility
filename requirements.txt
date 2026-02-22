@@ -4,3 +4,4 @@ aiohttp
 python-dotenv
 asyncpg
 pytz
+google-generativeai

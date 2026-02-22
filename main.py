@@ -1698,7 +1698,7 @@ async def mute_cmd(
             except:
                 pass
 
-    bot.loop.create_task(auto_unmute())
+    asyncio.create_task(auto_unmute())
 
     await interaction.response.send_message(
         f"🔇 Muted {member.mention} | Case #{case_id}"

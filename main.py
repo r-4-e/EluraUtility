@@ -3091,7 +3091,7 @@ async def log_cleanup_task():
                 db.delete("audit_logs", {"id": log["id"]})
 
 
-bot.loop.create_task(log_cleanup_task())
+asyncio.create_task(log_cleanup_task())
 
 # ==========================================================
 # 🌟 PHASE 8 – ELITE ROLE AUTOMATION + PROFESSIONAL WELCOME
@@ -3162,7 +3162,7 @@ async def role_health_monitor():
         print("✅ Role health scan completed.")
 
 
-bot.loop.create_task(role_health_monitor())
+asyncio.create_task(role_health_monitor())
 
 
 # ==========================================================
@@ -3199,7 +3199,7 @@ async def level_watcher():
         print("✅ Level watcher sync done.")
 
 
-bot.loop.create_task(level_watcher())
+asyncio.create_task(level_watcher())
 
 
 # ==========================================================
@@ -4040,7 +4040,7 @@ async def system_health_monitor():
         await asyncio.sleep(300)  # 5 minutes
 
 
-bot.loop.create_task(system_health_monitor())
+asyncio.create_task(system_health_monitor())
 
 
 # ==========================================================
@@ -4468,7 +4468,7 @@ async def reset_raid_counters():
         raid_message_tracker.clear()
 
 
-bot.loop.create_task(reset_raid_counters())
+asyncio.create_task(reset_raid_counters())
 
 
 # ==========================================================
@@ -4842,7 +4842,7 @@ async def cleanup_old_logs():
         await asyncio.sleep(86400)  # Run once daily
 
 
-bot.loop.create_task(cleanup_old_logs())
+asyncio.create_task(cleanup_old_logs())
 
 
 # ==========================================================
@@ -6019,7 +6019,7 @@ async def health_monitor():
         await asyncio.sleep(300)
 
 
-bot.loop.create_task(health_monitor())
+asyncio.create_task(health_monitor())
 
 
 # ==========================================================
@@ -6049,7 +6049,7 @@ async def auto_backup():
         await asyncio.sleep(86400)  # 24 hours
 
 
-bot.loop.create_task(auto_backup())
+asyncio.create_task(auto_backup())
 
 
 # ==========================================================

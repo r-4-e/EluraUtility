@@ -243,7 +243,7 @@ class DatabaseLayer:
 
     async def get_guild(self, guild_id: int):
         return await self._safe(
-            lambda: self.client.table("GUILDS")
+            lambda: self.client.table("guilds")
             .select("*")
             .eq("guild_id", guild_id)
             .single()
@@ -256,7 +256,7 @@ class DatabaseLayer:
             return existing
 
         return await self._safe(
-            lambda: self.client.table("GUILDS")
+            lambda: self.client.table("guilds")
             .insert({
                 "guild_id": guild_id,
                 "ai_enabled": False,
@@ -270,7 +270,7 @@ class DatabaseLayer:
 
     async def update_guild_field(self, guild_id: int, field: str, value):
         return await self._safe(
-            lambda: self.client.table("GUILDS")
+            lambda: self.client.table("guilds")
             .update({field: value})
             .eq("guild_id", guild_id)
             .execute()
@@ -282,7 +282,7 @@ class DatabaseLayer:
 
 async def get_staff_tiers(self, guild_id: int):
     return self._safe(
-        lambda: self.client.table("STAFF_TIERS")
+        lambda: self.client.table("staff_tiers")
         .select("*")
         .eq("guild_id", guild_id)
         .execute()
@@ -290,7 +290,7 @@ async def get_staff_tiers(self, guild_id: int):
 
 async def assign_staff_tier(self, guild_id: int, role_id: int, tier: int):
     return self._safe(
-        lambda: self.client.table("STAFF_TIERS")
+        lambda: self.client.table("staff_tiers")
         .upsert({
             "guild_id": guild_id,
             "role_id": role_id,
@@ -302,7 +302,7 @@ async def assign_staff_tier(self, guild_id: int, role_id: int, tier: int):
 
 async def remove_staff_tier(self, guild_id: int, role_id: int):
     return self._safe(
-        lambda: self.client.table("STAFF_TIERS")
+        lambda: self.client.table("staff_tiers")
         .delete()
         .eq("guild_id", guild_id)
         .eq("role_id", role_id)
@@ -315,7 +315,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
 
     async def ensure_user(self, guild_id: int, user_id: int):
         existing = await self._safe(
-            lambda: self.client.table("USERS")
+            lambda: self.client.table("users")
             .select("*")
             .eq("guild_id", guild_id)
             .eq("user_id", user_id)
@@ -327,7 +327,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
             return existing
 
         return await self._safe(
-            lambda: self.client.table("USERS")
+            lambda: self.client.table("users")
             .insert({
                 "guild_id": guild_id,
                 "user_id": user_id,
@@ -343,7 +343,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
 
     async def update_user_field(self, guild_id: int, user_id: int, field: str, value):
         return await self._safe(
-            lambda: self.client.table("USERS")
+            lambda: self.client.table("users")
             .update({field: value})
             .eq("guild_id", guild_id)
             .eq("user_id", user_id)
@@ -372,7 +372,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
             ).isoformat()
 
         return await self._safe(
-            lambda: self.client.table("CASES")
+            lambda: self.client.table("cases")
             .insert({
                 "guild_id": guild_id,
                 "user_id": user_id,
@@ -390,7 +390,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
 
     async def deactivate_case(self, case_id: int):
         return await self._safe(
-            lambda: self.client.table("CASES")
+            lambda: self.client.table("cases")
             .update({"active": False})
             .eq("case_id", case_id)
             .execute()
@@ -399,7 +399,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
     async def get_expired_cases(self):
         now = datetime.now(timezone.utc).isoformat()
         return await self._safe(
-            lambda: self.client.table("CASES")
+            lambda: self.client.table("cases")
             .select("*")
             .eq("active", True)
             .lte("expires_at", now)
@@ -412,7 +412,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
 
     async def get_automod(self, guild_id: int):
         return await self._safe(
-            lambda: self.client.table("AUTOMOD_SETTINGS")
+            lambda: self.client.table("automod_settings")
             .select("*")
             .eq("guild_id", guild_id)
             .single()
@@ -421,7 +421,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
 
     async def update_automod(self, guild_id: int, data: dict):
         return await self._safe(
-            lambda: self.client.table("AUTOMOD_SETTINGS")
+            lambda: self.client.table("automod_settings")
             .upsert({"guild_id": guild_id, **data})
             .execute()
         )
@@ -438,7 +438,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
         amount: int
     ):
         return await self._safe(
-            lambda: self.client.table("ECONOMY_TRANSACTIONS")
+            lambda: self.client.table("economy_transactions")
             .insert({
                 "guild_id": guild_id,
                 "user_id": user_id,
@@ -455,7 +455,7 @@ async def remove_staff_tier(self, guild_id: int, role_id: int):
 
     async def log_ai_usage(self, guild_id: int, user_id: int, tokens: int):
         return await self._safe(
-            lambda: self.client.table("AI_USAGE")
+            lambda: self.client.table("ai_usage")
             .upsert({
                 "guild_id": guild_id,
                 "user_id": user_id,

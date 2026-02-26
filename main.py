@@ -1144,7 +1144,7 @@ async def decay_strikes_loop():
             runtime.strike_counts[(guild_id, user_id)] = max(0, strikes - 1)
 
 # Background task
-asyncio.create_task(decay_strikes_loop())
+            asyncio.create_task(decay_strikes_loop())
 
 # ==========================================================
 # ESCALATION ENGINE

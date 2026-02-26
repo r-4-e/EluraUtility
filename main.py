@@ -58,7 +58,7 @@ class SupabaseManager:
 
     async def health_check(self):
         try:
-            self.client.table("GUILDS").select("guild_id").limit(1).execute()
+            self.client.table("guilds").select("guild_id").limit(1).execute()
             logger.info("Supabase connection successful.")
         except Exception as e:
             logger.critical(f"Database connection failed: {e}")

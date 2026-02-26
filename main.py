@@ -104,8 +104,8 @@ class GuildCache:
         logger.info("Warming guild cache...")
 
         try:
-            guilds = db.client.table("GUILDS").select("*").execute()
-            tiers = db.client.table("STAFF_TIERS").select("*").execute()
+            guilds = db.client.table("guilds").select("*").execute()
+            tiers = db.client.table("staff_tiers").select("*").execute()
 
             # Load guild configs
             for row in guilds.data:
@@ -149,14 +149,14 @@ async def expired_punishment_checker():
     while True:
         try:
             now = datetime.now(timezone.utc).isoformat()
-            expired = db.client.table("CASES") \
+            expired = db.client.table("cases") \
                 .select("*") \
                 .eq("active", True) \
                 .lte("expires_at", now) \
                 .execute()
 
             for case in expired.data:
-                db.client.table("CASES") \
+                db.client.table("cases") \
                     .update({"active": False}) \
                     .eq("case_id", case["case_id"]) \
                     .execute()

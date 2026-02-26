@@ -231,13 +231,12 @@ class DatabaseLayer:
     # SAFE EXECUTION WRAPPER
     # ------------------------------------------------------
 
-    async def _safe(self, func):
-        try:
-            return func()
-        except Exception as e:
-            logger.error(f"Database operation failed: {e}")
-            return None
-
+    def _safe(self, func):
+    try:
+        return func()
+    except Exception as e:
+        logger.error(f"Database operation failed: {e}")
+        return None
     # ======================================================
     # GUILD CONFIGURATION
     # ======================================================
@@ -282,33 +281,33 @@ class DatabaseLayer:
     # ======================================================
 
     async def get_staff_tiers(self, guild_id: int):
-        return await self._safe(
-            lambda: self.client.table("STAFF_TIERS")
-            .select("*")
-            .eq("guild_id", guild_id)
-            .execute()
-        )
+    return self._safe(
+        lambda: self.client.table("STAFF_TIERS")
+        .select("*")
+        .eq("guild_id", guild_id)
+        .execute()
+    )
 
-    async def assign_staff_tier(self, guild_id: int, role_id: int, tier: int):
-        return await self._safe(
-            lambda: self.client.table("STAFF_TIERS")
-            .upsert({
-                "guild_id": guild_id,
-                "role_id": role_id,
-                "tier_level": tier,
-                "assigned_at": datetime.now(timezone.utc).isoformat()
-            })
-            .execute()
-        )
+async def assign_staff_tier(self, guild_id: int, role_id: int, tier: int):
+    return self._safe(
+        lambda: self.client.table("STAFF_TIERS")
+        .upsert({
+            "guild_id": guild_id,
+            "role_id": role_id,
+            "tier_level": tier,
+            "assigned_at": datetime.now(timezone.utc).isoformat()
+        })
+        .execute()
+    )
 
-    async def remove_staff_tier(self, guild_id: int, role_id: int):
-        return await self._safe(
-            lambda: self.client.table("STAFF_TIERS")
-            .delete()
-            .eq("guild_id", guild_id)
-            .eq("role_id", role_id)
-            .execute()
-        )
+async def remove_staff_tier(self, guild_id: int, role_id: int):
+    return self._safe(
+        lambda: self.client.table("STAFF_TIERS")
+        .delete()
+        .eq("guild_id", guild_id)
+        .eq("role_id", role_id)
+        .execute()
+    )
 
     # ======================================================
     # USER MANAGEMENT
@@ -649,30 +648,31 @@ def require_tier(
     require_setup: bool = True,
     require_system: str | None = None
 ):
-    def decorator(func):
 
-        async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+    async def predicate(interaction: discord.Interaction):
 
-            target = None
-            if target_param and target_param in kwargs:
-                target = kwargs[target_param]
+        target = None
 
-            result = await permission_check(
-                interaction=interaction,
-                action=action,
-                target=target,
-                require_setup=require_setup,
-                require_system=require_system
-            )
+        if target_param:
+            try:
+                target = getattr(interaction.namespace, target_param)
+            except AttributeError:
+                target = None
 
-            if not result.allowed:
-                raise app_commands.CheckFailure(result.reason)
+        result = await permission_check(
+            interaction=interaction,
+            action=action,
+            target=target,
+            require_setup=require_setup,
+            require_system=require_system
+        )
 
-            return await func(interaction, *args, **kwargs)
+        if not result.allowed:
+            raise app_commands.CheckFailure(result.reason)
 
-        return wrapper
-    return decorator
+        return True
 
+    return app_commands.check(predicate)
 
 # ==========================================================
 # AUTOMOD BYPASS CHECK (FOR SECTION 5)

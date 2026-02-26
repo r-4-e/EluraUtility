@@ -1699,7 +1699,7 @@ async def daily_summary_loop():
         await asyncio.sleep(300)
 
 
-asyncio.create_task(daily_summary_loop())
+        asyncio.create_task(daily_summary_loop())
 
 
 # ==========================================================

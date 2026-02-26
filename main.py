@@ -232,11 +232,11 @@ class DatabaseLayer:
     # ------------------------------------------------------
 
     def _safe(self, func):
-    try:
-        return func()
-    except Exception as e:
-        logger.error(f"Database operation failed: {e}")
-        return None
+        try:
+            return func()
+        except Exception as e:
+            logger.error(f"Database operation failed: {e}")
+            return None
     # ======================================================
     # GUILD CONFIGURATION
     # ======================================================

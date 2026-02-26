@@ -280,7 +280,7 @@ class DatabaseLayer:
     # STAFF TIERS
     # ======================================================
 
-    async def get_staff_tiers(self, guild_id: int):
+async def get_staff_tiers(self, guild_id: int):
     return self._safe(
         lambda: self.client.table("STAFF_TIERS")
         .select("*")

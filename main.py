@@ -2533,7 +2533,7 @@ async def on_ready():
 
     await bot.tree.sync()
 
-    bot.loop.create_task(maintenance_loop())
+    asyncio.create_task(maintenance_loop())
 
     BOT_READY = True
     print("[BOOT] All systems loaded successfully.")

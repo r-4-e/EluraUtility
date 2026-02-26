@@ -1,7 +1,6 @@
 discord.py
-supabase
-aiohttp
 python-dotenv
-asyncpg
-pytz
+supabase
 google-generativeai
+Flask
+aiohttp

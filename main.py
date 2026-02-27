@@ -149,14 +149,14 @@ async def expired_punishment_checker():
     while True:
         try:
             now = datetime.now(timezone.utc).isoformat()
-            expired = db.client.table("cases") \
+            expired = db.client.table("moderation_cases") \
                 .select("*") \
                 .eq("active", True) \
                 .lte("expires_at", now) \
                 .execute()
 
             for case in expired.data:
-                db.client.table("cases") \
+                db.client.table("moderation_cases") \
                     .update({"active": False}) \
                     .eq("case_id", case["case_id"]) \
                     .execute()
